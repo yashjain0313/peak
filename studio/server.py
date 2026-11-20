@@ -706,6 +706,20 @@ def link_preview(request: Request, url: str = ""):
         raise HTTPException(422, "Couldn't open that video. Check the link is public and complete.")
 
 
+@app.get("/api/preview/frames")
+def link_preview_frames(request: Request, url: str = ""):
+    url = url.strip()[:500]
+    if not media.site_allowed(url):
+        raise HTTPException(400, "Paste a full YouTube, Twitch or Kick video link.")
+    try:
+        auth.throttle(f"preview-frames:{_me(request).id}", 6, 60)
+        return {"frames": media.preview_frames(url)}
+    except media.YouTubeBlocked as e:
+        raise HTTPException(503, str(e))
+    except Exception:
+        raise HTTPException(422, "Couldn't load preview frames. The video can still be processed.")
+
+
 @app.post("/api/jobs")
 def create_from_link(body: dict = Body(...)):
     _need_verified()

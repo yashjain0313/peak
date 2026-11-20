@@ -107,7 +107,7 @@ _by_user: dict = {}                       # user -> {job id: job}: listing one p
 _lock = threading.RLock()
 on_clip_ready: list = []   # callbacks (job, clip), run once when a clip first finishes
 
-DEFAULTS = {"max_clips": 6, "min_len": 15, "max_len": 60, "style": "bounce", "layout": "blur", "cam_rect": {"x": 0.0, "y": 0.0, "w": 0.25, "h": 0.3},
+DEFAULTS = {"max_clips": 6, "min_len": 15, "max_len": 60, "style": "bounce", "layout": "blur", "caption_language": "auto", "cam_rect": {"x": 0.0, "y": 0.0, "w": 0.25, "h": 0.3},
             "game_rect": {"x": 0.25, "y": 0.0, "w": 0.75, "h": 1.0}, "quality": 720,
             "range_start": None, "range_end": None, "captions": True}
 
@@ -133,6 +133,8 @@ def clean_options(options) -> dict:
             v = v if v in render.STYLES else DEFAULTS["style"]
         elif k == "layout":
             v = v if v in render.LAYOUTS else DEFAULTS["layout"]
+        elif k == "caption_language":
+            v = v if v in ("auto", "english", "hinglish") else DEFAULTS["caption_language"]
         elif k in ("cam_rect", "game_rect"):
             if not isinstance(v, dict):
                 continue
@@ -430,7 +432,8 @@ def _caption_words(job, clip, words, off):
         except Exception:  # noqa: BLE001 - captions still render with the words as heard
             pass
     # the last word on it: whatever was said, nothing is drawn in Hindi or Urdu script
-    return [dict(w, s=w["s"] - off, e=w["e"] - off) for w in roman.words(raw)]
+    words = raw if job.get("options", {}).get("caption_language") == "english" else roman.words(raw)
+    return [dict(w, s=w["s"] - off, e=w["e"] - off) for w in words]
 
 
 CLIP_MINUTES = float(config.env("PEAKCUT_CLIP_MINUTES", "15"))     # the longest one clip may take to make

@@ -189,6 +189,45 @@ def _caption_words(data: dict) -> list:
 _PREVIEWS: dict = {}
 
 
+def preview_frames(url: str, count: int = 4) -> list:
+    """Fetch a few low-resolution source frames for framing decisions without downloading the full video."""
+    import base64
+    import tempfile
+    import urllib.request
+
+    url = url.strip()
+    cached = _PREVIEWS.get(url, {}).get("frames")
+    if cached:
+        return cached
+    with _youtube_guard(url), _ydl({"format": "best[height<=480][vcodec!=none]/best[height<=480]/best"}) as ydl:
+        data = ydl.extract_info(url, download=False)
+    duration = float(data.get("duration") or 0)
+    stream = data.get("requested_formats") or [data]
+    stream = next((x for x in stream if x.get("url")), None)
+    if not stream or not duration:
+        return []
+    stream_url = stream["url"]
+    headers = "".join(f"{k}: {v}\r\n" for k, v in (stream.get("http_headers") or {}).items())
+    frames = []
+    with tempfile.TemporaryDirectory(prefix="pk-preview-") as folder:
+        for index, fraction in enumerate((0.08, 0.30, 0.60, 0.85)[:max(1, min(4, count))]):
+            out = Path(folder) / f"frame-{index}.jpg"
+            cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{duration * fraction:.2f}"]
+            if headers:
+                cmd += ["-headers", headers]
+            cmd += ["-i", stream_url, "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "5", str(out)]
+            try:
+                run(cmd, timeout=45)
+                raw = out.read_bytes()
+            except Exception:
+                continue
+            frames.append({"time": round(duration * fraction, 1),
+                           "image": "data:image/jpeg;base64," + base64.b64encode(raw).decode()})
+    if url in _PREVIEWS:
+        _PREVIEWS[url]["frames"] = frames
+    return frames
+
+
 def preview(url: str) -> dict:
     """What the user will get from a link, checked before any work starts. The thumbnail comes back inline
     (the page may only load images from this site). Cached, so retyping a link costs nothing."""

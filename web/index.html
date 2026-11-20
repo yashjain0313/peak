@@ -6210,7 +6210,7 @@
           })),
           c?.style ?? "bounce",
           c?.captions === false,
-        )}</div>
+        )}<label class="f" style="margin-top:10px">Caption language<select id="o_language"><option value="auto">Auto (keep speech language)</option><option value="english">English</option><option value="hinglish">Hinglish (Hindi/Urdu in Roman letters)</option></select></label></div>
       <div class="ob"><div class="ot">Layout</div>${choice(
         "o_layout",
         Object.entries(S.status.layouts).map(([k, v]) => ({
@@ -6362,6 +6362,7 @@
           min_len: n("#o_min"),
           max_len: n("#o_maxlen"),
           captions: $("#o_captions").checked,
+          caption_language: $("#o_language")?.value || "auto",
           style: $("#o_style").value,
           layout: $("#o_layout").value,
           quality: n("#o_quality"),
@@ -6414,6 +6415,110 @@
       const batchUsed = (A) =>
         A.files.length + A.links.filter((l) => l.state !== "bad").length;
       const newId = () => Math.random().toString(36).slice(2);
+      const PREVIEW_EDITORS = {};
+      const defaultFrame = (cam = false) =>
+        cam
+          ? { x: 0, y: 0, w: 0.25, h: 0.3 }
+          : { x: 0.25, y: 0, w: 0.75, h: 1 };
+      function previewEditorHtml(l) {
+        if (!l.frames?.length) return "";
+        const state = (PREVIEW_EDITORS[l.id] ||= {
+          index: 0,
+          mode: "cam",
+          cam: defaultFrame(true),
+          game: defaultFrame(false),
+        });
+        const frame = l.frames[state.index] || l.frames[0];
+        return `<div class="pv-editor" data-pv="${l.id}"><div class="pv-head"><b>Choose facecam and gameplay areas</b><span>Draw the active area on the preview</span></div>
+          <div class="pv-stage"><img class="pv-main" src="${frame.image}" alt="Video preview at ${frame.time}s"><canvas class="pv-canvas" width="640" height="360"></canvas></div>
+          <div class="pv-controls"><button type="button" class="chip ${state.mode === "cam" ? "on" : ""}" data-pv-mode="cam">Facecam</button><button type="button" class="chip ${state.mode === "game" ? "on" : ""}" data-pv-mode="game">Gameplay</button>${l.frames.map((x, i) => `<button type="button" class="chip ${i === state.index ? "on" : ""}" data-pv-frame="${i}">${x.time}s</button>`).join("")}</div>
+          <small class="hint">The selected rectangles are used by Facecam above gameplay, Bottom, PiP and Gameplay only layouts.</small></div>`;
+      }
+      function paintPreview(l) {
+        const root = document.querySelector(`[data-pv="${l.id}"]`),
+          state = PREVIEW_EDITORS[l.id];
+        if (!root || !state) return;
+        const canvas = root.querySelector(".pv-canvas"),
+          ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (const [key, color] of [
+          ["game", "#38d9ff"],
+          ["cam", "#ff8b33"],
+        ]) {
+          const r = state[key];
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 3;
+          ctx.strokeRect(
+            r.x * canvas.width,
+            r.y * canvas.height,
+            r.w * canvas.width,
+            r.h * canvas.height,
+          );
+          ctx.fillStyle = color;
+          ctx.font = "bold 14px sans-serif";
+          ctx.fillText(
+            key === "cam" ? "FACECAM" : "GAMEPLAY",
+            r.x * canvas.width + 5,
+            r.y * canvas.height + 17,
+          );
+        }
+      }
+      function attachPreviewEditor(l) {
+        const root = document.querySelector(`[data-pv="${l.id}"]`),
+          state = PREVIEW_EDITORS[l.id];
+        if (!root || !state) return;
+        paintPreview(l);
+        root.querySelectorAll("[data-pv-mode]").forEach(
+          (b) =>
+            (b.onclick = () => {
+              state.mode = b.dataset.pvMode;
+              drawAtt();
+            }),
+        );
+        root.querySelectorAll("[data-pv-frame]").forEach(
+          (b) =>
+            (b.onclick = () => {
+              state.index = Number(b.dataset.pvFrame);
+              drawAtt();
+            }),
+        );
+        const canvas = root.querySelector(".pv-canvas");
+        let start;
+        const point = (e) => {
+          const r = canvas.getBoundingClientRect();
+          return {
+            x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)),
+            y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)),
+          };
+        };
+        canvas.onpointerdown = (e) => {
+          start = point(e);
+          canvas.setPointerCapture(e.pointerId);
+        };
+        canvas.onpointermove = (e) => {
+          if (!start) return;
+          const p = point(e);
+          state[state.mode] = {
+            x: Math.min(start.x, p.x),
+            y: Math.min(start.y, p.y),
+            w: Math.max(0.01, Math.abs(p.x - start.x)),
+            h: Math.max(0.01, Math.abs(p.y - start.y)),
+          };
+          paintPreview(l);
+        };
+        canvas.onpointerup = () => {
+          start = null;
+        };
+        canvas.onpointercancel = () => {
+          start = null;
+        };
+      }
+      function previewOptions(l, base) {
+        const state = PREVIEW_EDITORS[l.id];
+        return state
+          ? { ...base, cam_rect: state.cam, game_rect: state.game }
+          : base;
+      }
 
       function attach(list) {
         const A = att(),
@@ -6488,19 +6593,21 @@
               return `<div class="lp bad" data-row="${l.id}">${ic("warn")}<span><b>${esc(l.url)}</b>${esc(l.msg)}</span>
       ${A.busy ? "" : `<button type="button" class="rm" data-rm="link" data-id="${l.id}" aria-label="Remove link">${ic("x")}</button>`}</div>`;
             const i = l.info;
-            return rowHtml(A, {
-              id: l.id,
-              kind: "link",
-              thumb: i.thumb ? `<img src="${i.thumb}" alt="">` : "",
-              len: i.duration && !i.is_live ? fmtLen(i.duration) : "",
-              title: i.title,
-              sub: esc(i.uploader || "Video link"),
-              side: l.sending
-                ? `<span class="ok up">Sending</span>`
-                : i.is_live
-                  ? `<span class="ok live"><i></i>Live now</span>`
-                  : `<span class="ok">${ic("check")}Ready</span>`,
-            });
+            return (
+              rowHtml(A, {
+                id: l.id,
+                kind: "link",
+                thumb: i.thumb ? `<img src="${i.thumb}" alt="">` : "",
+                len: i.duration && !i.is_live ? fmtLen(i.duration) : "",
+                title: i.title,
+                sub: esc(i.uploader || "Video link"),
+                side: l.sending
+                  ? `<span class="ok up">Sending</span>`
+                  : i.is_live
+                    ? `<span class="ok live"><i></i>Live now</span>`
+                    : `<span class="ok">${ic("check")}Ready</span>`,
+              }) + previewEditorHtml(l)
+            );
           })
           .join("");
         h += A.files
@@ -6529,6 +6636,9 @@
         if (n && !A.busy && n < batchMax())
           h += `<button type="button" class="addrow" data-act="addmore">${ic("plus")}Add another video<span>${n} of ${batchMax()}</span></button>`;
         if (box.innerHTML !== h) box.innerHTML = h;
+        A.links
+          .filter((l) => l.state === "ok" && l.frames?.length)
+          .forEach((l) => attachPreviewEditor(l));
         box.querySelectorAll("video").forEach((v) =>
           v.addEventListener(
             "loadedmetadata",
@@ -6609,6 +6719,12 @@
             (info) => {
               l.state = "ok";
               l.info = info;
+              api("/api/preview/frames?url=" + encodeURIComponent(u))
+                .then((result) => {
+                  l.frames = result.frames || [];
+                  drawAtt();
+                })
+                .catch(() => {});
             },
             (e) => {
               l.state = "bad";
@@ -6855,7 +6971,7 @@
           try {
             await send("/api/jobs", {
               url: l.url,
-              options: opts,
+              options: previewOptions(l, opts),
               creator: who,
             });
             l.state = "done";
