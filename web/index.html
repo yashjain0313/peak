@@ -1723,6 +1723,20 @@
         padding: 1px 6px;
         border-radius: 6px;
       }
+      .pv-editor {
+        display: grid;
+        gap: 8px;
+        padding: 10px;
+        border: 1px solid var(--line-2);
+        border-radius: 12px;
+        background: #fff;
+      }
+      .pv-head { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+      .pv-head span { color: var(--dim); }
+      .pv-stage { position: relative; width: min(100%, 640px); aspect-ratio: 16 / 9; overflow: hidden; border-radius: 8px; background: #201612; }
+      .pv-main, .pv-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+      .pv-canvas { touch-action: none; cursor: crosshair; }
+      .pv-controls { display: flex; flex-wrap: wrap; gap: 6px; }
       .lp .tx {
         min-width: 0;
         flex: 1;
@@ -6199,6 +6213,7 @@
         ${stepper("o_min", "Shortest", c?.min_len ?? 15, 5, 120, 5, "s")}
         ${stepper("o_maxlen", "Longest", c?.max_len ?? 60, 10, 180, 5, "s")}
       </div></div>
+      <div class="ob"><div class="ot">Workflow</div><input type="hidden" id="o_mode" value="podcast"><div class="seg" role="group" aria-label="Workflow"><button type="button" data-seg="o_mode" data-v="podcast" aria-pressed="true">Podcast<small>Normal full-frame clips</small></button><button type="button" data-seg="o_mode" data-v="gameplay" aria-pressed="false">Gameplay<small>Choose facecam + game areas</small></button></div></div>
       <div class="ob"><div class="ot cap-head"><span id="o_style_label">Caption style</span>
         <label><input type="checkbox" id="o_captions" data-caption-toggle ${c?.captions === false ? "" : "checked"}>Generate captions</label></div>
         ${choice(
@@ -6316,6 +6331,12 @@
           sg.parentElement
             .querySelectorAll("[data-seg]")
             .forEach((b) => b.setAttribute("aria-pressed", String(b === sg)));
+          if (sg.dataset.seg === "o_mode") {
+            const layout = $("#o_layout");
+            if (layout && sg.dataset.v === "podcast") layout.value = "blur";
+            if (layout && sg.dataset.v === "gameplay" && layout.value === "blur") layout.value = "stack";
+            drawAtt();
+          }
           return;
         }
         const st = e.target.closest("[data-step]");
@@ -6363,6 +6384,7 @@
           max_len: n("#o_maxlen"),
           captions: $("#o_captions").checked,
           caption_language: $("#o_language")?.value || "auto",
+          mode: $("#o_mode")?.value || "podcast",
           style: $("#o_style").value,
           layout: $("#o_layout").value,
           quality: n("#o_quality"),
@@ -6421,6 +6443,9 @@
           ? { x: 0, y: 0, w: 0.25, h: 0.3 }
           : { x: 0.25, y: 0, w: 0.75, h: 1 };
       function previewEditorHtml(l) {
+        if ($("#o_mode")?.value !== "gameplay") return "";
+        if (l.framesPending) return `<div class="pv-editor"><div class="pv-head"><b>Loading video preview…</b><span>Frames are prepared on the Kaggle server</span></div></div>`;
+        if (l.framesError) return `<div class="pv-editor"><div class="pv-head"><b>Preview unavailable</b><span>${esc(l.framesError)}</span></div><small class="hint">The video can still be processed, but gameplay framing needs a preview frame.</small></div>`;
         if (!l.frames?.length) return "";
         const state = (PREVIEW_EDITORS[l.id] ||= {
           index: 0,
@@ -6719,12 +6744,19 @@
             (info) => {
               l.state = "ok";
               l.info = info;
+              l.framesPending = true;
+              drawAtt();
               api("/api/preview/frames?url=" + encodeURIComponent(u))
                 .then((result) => {
                   l.frames = result.frames || [];
+                  l.framesPending = false;
                   drawAtt();
                 })
-                .catch(() => {});
+                .catch((error) => {
+                  l.framesPending = false;
+                  l.framesError = error.message || "Could not load preview frames.";
+                  drawAtt();
+                });
             },
             (e) => {
               l.state = "bad";

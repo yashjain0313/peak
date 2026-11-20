@@ -107,7 +107,7 @@ _by_user: dict = {}                       # user -> {job id: job}: listing one p
 _lock = threading.RLock()
 on_clip_ready: list = []   # callbacks (job, clip), run once when a clip first finishes
 
-DEFAULTS = {"max_clips": 6, "min_len": 15, "max_len": 60, "style": "bounce", "layout": "blur", "caption_language": "auto", "cam_rect": {"x": 0.0, "y": 0.0, "w": 0.25, "h": 0.3},
+DEFAULTS = {"mode": "podcast", "max_clips": 6, "min_len": 15, "max_len": 60, "style": "bounce", "layout": "blur", "caption_language": "auto", "cam_rect": {"x": 0.0, "y": 0.0, "w": 0.25, "h": 0.3},
             "game_rect": {"x": 0.25, "y": 0.0, "w": 0.75, "h": 1.0}, "quality": 720,
             "range_start": None, "range_end": None, "captions": True}
 
@@ -123,6 +123,9 @@ def clean_options(options) -> dict:
             if not isinstance(v, bool):
                 raise ValueError("Captions must be on or off.")
             out[k] = v
+            continue
+        if k == "mode":
+            out[k] = v if v in ("podcast", "gameplay") else DEFAULTS["mode"]
             continue
         if k not in DEFAULTS or v in ("", None):
             continue
@@ -394,7 +397,9 @@ def render_one(job, clip, words):
         src = Path(clip["src"]) if clip.get("src") else Path(job["source_path"])
         if not clip.get("src"):
             clip["end"] = min(clip["end"], job["duration"])
+        mode = job.get("options", {}).get("mode", "podcast")
         local = dict(clip, start=clip["start"] - off, end=clip["end"] - off, hook=roman.to_roman(clip.get("hook") or ""),
+                 layout=clip.get("layout", "blur") if mode == "gameplay" else "blur",
                  cam_rect=clip.get("cam_rect") or job.get("options", {}).get("cam_rect"),
                  game_rect=clip.get("game_rect") or job.get("options", {}).get("game_rect"))
         near = _caption_words(job, clip, words, off) if clip.get("captions", True) else []

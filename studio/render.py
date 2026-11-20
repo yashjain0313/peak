@@ -260,17 +260,21 @@ def _filter(layout, fg_h, src_w, src_h, cam_rect=None, game_rect=None):
     if layout in ("stack", "bottom", "pip", "game"):
         cx, cy, cw, ch = _rect_pixels(cam_rect, src_w, src_h)
         gx, gy, gw, gh = _rect_pixels(game_rect, src_w, src_h)
+        def contain(label, width, height):
+            return (f"scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
+                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black")
+
         if layout == "game":
-            return f"[0:v]crop={gw}:{gh}:{gx}:{gy},scale={W}:{H},setsar=1[v0];"
+            return f"[0:v]crop={gw}:{gh}:{gx}:{gy},{contain('game', W, H)}[game];[game]setsar=1[v0];"
         if layout in ("stack", "bottom"):
-            cam_h = max(2, H * ch // (ch + gh))
+            cam_h = max(2, (H * ch // (ch + gh)) // 2 * 2)
             game_h = H - cam_h
-            top = (f"[0:v]split=2[a][b];[a]crop={cw}:{ch}:{cx}:{cy},scale={W}:{cam_h}[cam];"
-                   f"[b]crop={gw}:{gh}:{gx}:{gy},scale={W}:{game_h}[game];")
+            top = (f"[0:v]split=2[a][b];[a]crop={cw}:{ch}:{cx}:{cy},{contain('cam', W, cam_h)}[cam];"
+                   f"[b]crop={gw}:{gh}:{gx}:{gy},{contain('game', W, game_h)}[game];")
             return top + (f"[game][cam]vstack=inputs=2,setsar=1[v0];" if layout == "bottom" else f"[cam][game]vstack=inputs=2,setsar=1[v0];")
         pip_w, pip_h = max(2, W // 3), max(2, int(W / max(cw / ch, 0.01) / 3))
         return (f"[0:v]split=2[a][b];[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}[game];"
-                f"[b]crop={cw}:{ch}:{cx}:{cy},scale={pip_w}:{pip_h}[cam];[game][cam]overlay=24:24,setsar=1[v0];")
+                f"[b]crop={cw}:{ch}:{cx}:{cy},{contain('cam', pip_w, pip_h)}[cam];[game][cam]overlay=24:24,setsar=1[v0];")
     if layout == "crop":
         return f"[0:v]fps={config.OUT_FPS},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1[v0];"
     return (f"[0:v]fps={config.OUT_FPS},split=2[a][b];"
