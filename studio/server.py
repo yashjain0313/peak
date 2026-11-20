@@ -1461,6 +1461,28 @@ def add_posts(body: dict = Body(...)):
     return {"queued": len(made)}
 
 
+@app.post("/api/posts/bulk")
+def add_bulk_posts(body: dict = Body(...)):
+    job = jobs.get(str(body.get("job")))
+    if not job:
+        raise HTTPException(404, "That video was not found.")
+    wanted = body.get("clips")
+    wanted = {str(cid) for cid in wanted} if isinstance(wanted, list) else {c["id"] for c in job["clips"]}
+    clips = [c for c in job["clips"] if c["id"] in wanted and c.get("status") == "done"]
+    if not clips:
+        raise HTTPException(400, "None of this video's clips are ready.")
+    accounts_for_post = [str(a) for a in body.get("accounts", [])[:20]] if isinstance(body.get("accounts"), list) else []
+    if not accounts_for_post:
+        creator = creators.get(job.get("creator")) if job.get("creator") else None
+        accounts_for_post = (creator or {}).get("accounts", []) or [a["id"] for a in accounts.list_accounts()]
+    if not accounts_for_post:
+        raise HTTPException(400, "Connect a posting account first.")
+    made = sum((len(posting.enqueue(job, clip, accounts_for_post, now=bool(body.get("now")))) for clip in clips), 0)
+    if not made:
+        raise HTTPException(400, "Nothing was queued. These clips may already be queued for those accounts.")
+    return {"queued": made, "clips": len(clips)}
+
+
 @app.post("/api/posts/{pid}/{action}")
 def post_action(pid: str, action: str):
     try:

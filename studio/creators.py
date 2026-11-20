@@ -14,7 +14,8 @@ def _root() -> Path:
 
 _lock = threading.RLock()
 
-DEFAULTS = {"name": "", "channel": "", "style": "bounce", "layout": "blur", "captions": True, "min_len": 15, "max_len": 60,
+DEFAULTS = {"name": "", "channel": "", "style": "bounce", "layout": "blur", "cam_rect": {"x": 0.0, "y": 0.0, "w": 0.25, "h": 0.3},
+            "game_rect": {"x": 0.25, "y": 0.0, "w": 0.75, "h": 1.0}, "captions": True, "min_len": 15, "max_len": 60,
             "max_clips": 6, "min_score": 80, "auto_watch": False, "buffer_min": 20, "live_per_hour": 4, "ai_every_min": 3, "ai_only_on_spike": True, "auto_jump_pct": 60,
             "plan": "free", "decide_mode": "both", "must_clip_min": 0, "min_gap_min": 2,
             "trigger_words": "clip that, clip it",
@@ -67,6 +68,18 @@ def _clean(data: dict) -> dict:
             v = max(lo, min(hi, int(float(v))))
         elif k in ("auto_watch", "autopost", "ai_only_on_spike"):
             v = bool(v)
+        elif k in ("cam_rect", "game_rect"):
+            if not isinstance(v, dict):
+                continue
+            try:
+                values = {key: float(v[key]) for key in ("x", "y", "w", "h")}
+            except (KeyError, TypeError, ValueError):
+                continue
+            if any(not 0 <= values[key] <= 1 for key in ("x", "y")) or any(not 0 < values[key] <= 1 for key in ("w", "h")):
+                continue
+            if values["x"] + values["w"] > 1 or values["y"] + values["h"] > 1:
+                continue
+            v = values
         elif k == "channels":
             v = {p: str(u).strip()[:300] for p, u in (v.items() if isinstance(v, dict) else []) if p in PLATFORMS and str(u).strip()}
         elif k == "accounts":

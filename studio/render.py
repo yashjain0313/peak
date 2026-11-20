@@ -97,7 +97,8 @@ def install_fonts():
         pass  # best effort; captions will still work if the system already has a compatible font
 
 
-LAYOUTS = {"blur": "Full frame + blurred fill", "zoom": "Zoomed in + blurred fill", "crop": "Fill the screen (centre crop)"}
+LAYOUTS = {"blur": "Full frame + blurred fill", "zoom": "Zoomed in + blurred fill", "crop": "Fill the screen (centre crop)",
+           "stack": "Facecam above gameplay", "bottom": "Gameplay above facecam", "pip": "Floating facecam", "game": "Gameplay only"}
 
 
 def _ts(t):
@@ -246,7 +247,30 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return head + "\n".join(ev) + "\n"
 
 
-def _filter(layout, fg_h):
+def _rect_pixels(rect, src_w, src_h):
+    r = rect if isinstance(rect, dict) else {}
+    x, y = max(0.0, min(1.0, float(r.get("x", 0)))), max(0.0, min(1.0, float(r.get("y", 0))))
+    w, h = max(0.01, min(1.0, float(r.get("w", 1)))), max(0.01, min(1.0, float(r.get("h", 1))))
+    px, py = int(x * src_w), int(y * src_h)
+    pw, ph = max(2, int(w * src_w)), max(2, int(h * src_h))
+    return px, py, min(pw, src_w - px), min(ph, src_h - py)
+
+
+def _filter(layout, fg_h, src_w, src_h, cam_rect=None, game_rect=None):
+    if layout in ("stack", "bottom", "pip", "game"):
+        cx, cy, cw, ch = _rect_pixels(cam_rect, src_w, src_h)
+        gx, gy, gw, gh = _rect_pixels(game_rect, src_w, src_h)
+        if layout == "game":
+            return f"[0:v]crop={gw}:{gh}:{gx}:{gy},scale={W}:{H},setsar=1[v0];"
+        if layout in ("stack", "bottom"):
+            cam_h = max(2, H * ch // (ch + gh))
+            game_h = H - cam_h
+            top = (f"[0:v]split=2[a][b];[a]crop={cw}:{ch}:{cx}:{cy},scale={W}:{cam_h}[cam];"
+                   f"[b]crop={gw}:{gh}:{gx}:{gy},scale={W}:{game_h}[game];")
+            return top + (f"[game][cam]vstack=inputs=2,setsar=1[v0];" if layout == "bottom" else f"[cam][game]vstack=inputs=2,setsar=1[v0];")
+        pip_w, pip_h = max(2, W // 3), max(2, int(W / max(cw / ch, 0.01) / 3))
+        return (f"[0:v]split=2[a][b];[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}[game];"
+                f"[b]crop={cw}:{ch}:{cx}:{cy},scale={pip_w}:{pip_h}[cam];[game][cam]overlay=24:24,setsar=1[v0];")
     if layout == "crop":
         return f"[0:v]fps={config.OUT_FPS},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1[v0];"
     return (f"[0:v]fps={config.OUT_FPS},split=2[a][b];"
@@ -273,18 +297,19 @@ def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, sr
     # break the filter syntax).
     work = Path(tempfile.mkdtemp(prefix="pk"))
     try:
-        return _render_in(work, src, out_dir, name, start, end, layout, fg_h, ass)
+        return _render_in(work, src, out_dir, name, start, end, layout, fg_h, ass, src_w, src_h, clip)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
 
-def _render_in(work: Path, src: Path, out_dir: Path, name: str, start, end, layout, fg_h, ass: str) -> dict:
+def _render_in(work: Path, src: Path, out_dir: Path, name: str, start, end, layout, fg_h, ass: str,
+               src_w: int, src_h: int, clip: dict) -> dict:
     global _qsv_ok
     (work / f"{name}.ass").write_text(ass, encoding="utf-8")
     # ffmpeg's ass filter no longer supports fontsdir; it uses fontconfig instead.
     # install_fonts() already placed the bundled fonts in ~/Library/Fonts (macOS) or
     # ~/.local/share/fonts (Linux) so fontconfig finds them automatically.
-    fc = _filter(layout, fg_h) + f"[v0]ass={name}.ass[v]"
+    fc = _filter(layout, fg_h, src_w, src_h, clip.get("cam_rect"), clip.get("game_rect")) + f"[v0]ass={name}.ass[v]"
     base = ["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.2f}", "-t", f"{end - start:.2f}", "-i", str(src),
             "-filter_complex", fc, "-map", "[v]", "-map", "0:a:0", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
             "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-movflags", "+faststart", "-pix_fmt"]

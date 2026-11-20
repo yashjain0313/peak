@@ -107,7 +107,8 @@ _by_user: dict = {}                       # user -> {job id: job}: listing one p
 _lock = threading.RLock()
 on_clip_ready: list = []   # callbacks (job, clip), run once when a clip first finishes
 
-DEFAULTS = {"max_clips": 6, "min_len": 15, "max_len": 60, "style": "bounce", "layout": "blur", "quality": 720,
+DEFAULTS = {"max_clips": 6, "min_len": 15, "max_len": 60, "style": "bounce", "layout": "blur", "cam_rect": {"x": 0.0, "y": 0.0, "w": 0.25, "h": 0.3},
+            "game_rect": {"x": 0.25, "y": 0.0, "w": 0.75, "h": 1.0}, "quality": 720,
             "range_start": None, "range_end": None, "captions": True}
 
 
@@ -132,6 +133,16 @@ def clean_options(options) -> dict:
             v = v if v in render.STYLES else DEFAULTS["style"]
         elif k == "layout":
             v = v if v in render.LAYOUTS else DEFAULTS["layout"]
+        elif k in ("cam_rect", "game_rect"):
+            if not isinstance(v, dict):
+                continue
+            try:
+                v = {key: float(v[key]) for key in ("x", "y", "w", "h")}
+            except (KeyError, TypeError, ValueError):
+                continue
+            if (not all(0 <= v[k] <= 1 for k in ("x", "y")) or not all(0 < v[k] <= 1 for k in ("w", "h"))
+                    or v["x"] + v["w"] > 1 or v["y"] + v["h"] > 1):
+                continue
         else:                                    # range_start, range_end: seconds into the video
             v = float(v)
             if not math.isfinite(v) or v < 0:
@@ -288,7 +299,7 @@ def create(source: dict, options: dict, enqueue=True, creator=None, kind="video"
     c = creators.get(creator) if creator else None
     if c:
         d = creators.root(c["id"]) / ("live" if kind == "live" else "videos") / jid
-        base = {**DEFAULTS, **{k: c[k] for k in ("max_clips", "min_len", "max_len", "style", "layout", "captions")}}
+        base = {**DEFAULTS, **{k: c[k] for k in ("max_clips", "min_len", "max_len", "style", "layout", "cam_rect", "game_rect", "captions")}}
     else:
         d, base, creator = config.user_dir(ctx.uid()) / "jobs" / jid, dict(DEFAULTS), None
     opts = {**base, **clean_options(options)}
@@ -381,7 +392,9 @@ def render_one(job, clip, words):
         src = Path(clip["src"]) if clip.get("src") else Path(job["source_path"])
         if not clip.get("src"):
             clip["end"] = min(clip["end"], job["duration"])
-        local = dict(clip, start=clip["start"] - off, end=clip["end"] - off, hook=roman.to_roman(clip.get("hook") or ""))
+        local = dict(clip, start=clip["start"] - off, end=clip["end"] - off, hook=roman.to_roman(clip.get("hook") or ""),
+                 cam_rect=clip.get("cam_rect") or job.get("options", {}).get("cam_rect"),
+                 game_rect=clip.get("game_rect") or job.get("options", {}).get("game_rect"))
         near = _caption_words(job, clip, words, off) if clip.get("captions", True) else []
         out = render.render_clip(src, d / "clips", clip["id"], local, near, job["width"], job["height"])
         clip.update(out, status="done", version=clip.get("version", 0) + 1, error=None)
