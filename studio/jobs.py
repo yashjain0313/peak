@@ -112,7 +112,7 @@ DEFAULTS = {"mode": "podcast", "max_clips": 6, "min_len": 15, "max_len": 60, "st
             "range_start": None, "range_end": None, "captions": True}
 
 
-LIMITS = {"max_clips": (1, 20), "min_len": (5, 120), "max_len": (10, 180), "quality": (360, 1080)}
+LIMITS = {"max_clips": (1, 100), "min_len": (5, 120), "max_len": (10, 180), "quality": (360, 1080)}
 
 
 def clean_options(options) -> dict:
@@ -358,6 +358,20 @@ def delete(jid):
     return bool(job)
 
 
+def cancel(jid):
+    """Stop a queued or running video without deleting it or its clips already made."""
+    job = _jobs.get(jid)
+    if not job:
+        return False
+    if job["status"] not in ("queued", "running"):
+        raise ValueError("This video is no longer being processed.")
+    for clip in job["clips"]:
+        if clip.get("status") in ("queued", "rendering"):
+            clip.update(status="cancelled", error="Cancelled by you.")
+    _set(job, status="cancelled", stage="Cancelled by you", error=None)
+    return True
+
+
 def request_render(jid, cid, changes: dict):
     job = _jobs[jid]
     clip = next(c for c in job["clips"] if c["id"] == cid)
@@ -451,6 +465,8 @@ def _wait_for_clips(job, futures, began, workers):
     left, given_up = list(futures), 0
     late = "This clip took too long and was stopped. Open it and press Save and re-make to try again."
     while left:
+        if job.get("status") == "cancelled":
+            return
         still = []
         for f, clip in left:
             if f.done():
@@ -547,12 +563,16 @@ def _covers(words: list, start: float, end: float) -> bool:
 def _run_job(job):
     import math
     from concurrent.futures import ThreadPoolExecutor
+    def cancelled():
+        return job.get("status") == "cancelled"
     d = Path(job["dir"])
     o = job["options"]
     src = job["source"]
     t0 = time.time()
     notes = []
     usage.set_context(job["creator"], job["title"] or src.get("name"))
+    if cancelled():
+        return
     resuming = bool(job.pop("resume", False)) and (d / "words.json").is_file()
     if resuming:   # after a restart: keep the transcript parts, clips and AI answers already made, and carry on
         _set(job, status="running", stage="Picking up where it stopped", error=None)
@@ -696,6 +716,11 @@ def _run_job(job):
             heard[i] = ahead.submit(ctx.bind(transcribe.transcribe), audio[a_:b_], tp)
 
     for bi, (a, b) in enumerate(blocks):
+        if cancelled():
+            ahead.shutdown(wait=False)
+            fetch.shutdown(wait=False)
+            renders.shutdown(wait=False)
+            return
         if bi < done_blocks:
             continue                      # transcribed and checked by the AI before the restart
         shift = a / 16000
@@ -738,6 +763,11 @@ def _run_job(job):
     if futures:
         _set(job, stage="Finishing the clips", progress=max(job["progress"], 0.92))
     _wait_for_clips(job, futures, began, renders._max_workers)
+    if cancelled():
+        renders.shutdown(wait=False)
+        ahead.shutdown(wait=False)
+        fetch.shutdown(wait=False)
+        return
     if exact:           # keep our own words for the clips in the saved transcript, so editing a clip later uses them
         for a_s, b_s, tw in exact.values():
             words = [w for w in words if not a_s <= w["s"] < b_s] + tw
@@ -776,6 +806,10 @@ def _worker(quick_only=False):
             if kind == "job":
                 _q.done()
             continue
+        if job.get("status") == "cancelled":
+            if kind == "job":
+                _q.done()
+            continue
         token = ctx._uid.set(job["user"])  # everything this job does runs as its owner
         try:
             if kind == "job":
@@ -789,11 +823,12 @@ def _worker(quick_only=False):
         except Exception as e:  # noqa: BLE001
             (Path(job["dir"]) / "error.log").write_text(traceback.format_exc(), encoding="utf-8")
             if kind == "job":
-                for c in job["clips"]:
-                    if c.get("status") in ("queued", "rendering"):
-                        c.update(status="error", error="The video stopped before this clip was made.")
-                _set(job, status="error", error=safe.friendly(e), stage="Stopped")
-                creators.log(job["creator"], f"Video failed: {safe.friendly(e)[:200]}")
+                if job.get("status") != "cancelled":
+                    for c in job["clips"]:
+                        if c.get("status") in ("queued", "rendering"):
+                            c.update(status="error", error="The video stopped before this clip was made.")
+                    _set(job, status="error", error=safe.friendly(e), stage="Stopped")
+                    creators.log(job["creator"], f"Video failed: {safe.friendly(e)[:200]}")
         finally:
             ctx._uid.reset(token)
             if kind == "job":

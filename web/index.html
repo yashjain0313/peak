@@ -6209,7 +6209,7 @@
     </div>
     <div class="composer-opts" inert><div class="og">
       <div class="ob wide"><div class="ot">Clips</div><div class="nsteps">
-        ${stepper("o_max", "How many", c?.max_clips ?? 6, 1, 20, 1, "")}
+        ${stepper("o_max", "How many", c?.max_clips ?? 6, 1, 100, 1, "")}
         ${stepper("o_min", "Shortest", c?.min_len ?? 15, 5, 120, 5, "s")}
         ${stepper("o_maxlen", "Longest", c?.max_len ?? 60, 10, 180, 5, "s")}
       </div></div>
@@ -6440,8 +6440,8 @@
       const PREVIEW_EDITORS = {};
       const defaultFrame = (cam = false) =>
         cam
-          ? { x: 0, y: 0, w: 0.25, h: 0.3 }
-          : { x: 0.25, y: 0, w: 0.75, h: 1 };
+          ? { x: 0, y: 0, w: 1, h: 0.5 }
+          : { x: 0, y: 0.5, w: 1, h: 0.5 };
       function previewEditorHtml(l) {
         if ($("#o_mode")?.value !== "gameplay") return "";
         if (l.framesPending) return `<div class="pv-editor"><div class="pv-head"><b>Loading video preview…</b><span>Frames are prepared on the Kaggle server</span></div></div>`;
@@ -7192,7 +7192,7 @@
         return `<div class="job-head"><div class="jt"><span class="jthumb">${pic}${j.duration ? `<span class="du">${fmt(j.duration)}</span>` : ""}</span><div style="min-width:0"><h3>${esc(j.title || j.source.name)}</h3><p class="sub">${meta}</p></div></div>
       <div class="row" style="flex-wrap:nowrap;gap:4px">${
         busy
-          ? ""
+          ? `<button class="btn sm ghost" data-act="canceljob" data-j="${j.id}">Cancel</button>`
           : `
         ${j.clips.some((c) => c.status === "done") ? `<button class="btn sm icon ghost" data-act="dlall" data-j="${j.id}" title="Download all clips of this video" aria-label="Download all clips of this video">${ic("down")}</button>` : ""}
         ${j.clips.some((c) => c.status === "done") && S.accounts.length ? `<button class="btn sm primary" data-act="bulkpost" data-j="${j.id}" title="Queue all finished clips for posting">${ic("send")}Queue all clips</button>` : ""}
@@ -8526,6 +8526,13 @@
             await send("/api/account/delete", { confirm: typed });
             location.href = "/";
             return;
+          }
+          if (a === "canceljob") {
+            if (!(await ask("Cancel this process?", "Stop processing this video now. Clips already made will be kept.", "Cancel process", true)))
+              return;
+            await api(`/api/jobs/${d.j}/cancel`, { method: "POST" });
+            toast("Process cancelled", "ok");
+            return tick();
           }
           if (a === "deljob") {
             if (

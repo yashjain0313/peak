@@ -204,15 +204,25 @@ def preview_frames(url: str, count: int = 4) -> list:
     duration = float(data.get("duration") or 0)
     stream = data.get("requested_formats") or [data]
     stream = next((x for x in stream if x.get("url")), None)
-    if not stream or not duration:
+    if not stream:
         return []
     stream_url = stream["url"]
+    if not duration:
+        try:
+            duration = float(run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                                  "-of", "default=noprint_wrappers=1:nokey=1", stream_url], timeout=20).strip())
+        except Exception:
+            duration = 0
+    if not duration:
+        return []
     headers = "".join(f"{k}: {v}\r\n" for k, v in (stream.get("http_headers") or {}).items())
     frames = []
     with tempfile.TemporaryDirectory(prefix="pk-preview-") as folder:
         for index, fraction in enumerate((0.08, 0.30, 0.60, 0.85)[:max(1, min(4, count))]):
             out = Path(folder) / f"frame-{index}.jpg"
-            cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{duration * fraction:.2f}"]
+            cmd = ["ffmpeg", "-y", "-v", "error", "-nostdin",
+                   "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+                   "-ss", f"{duration * fraction:.2f}"]
             if headers:
                 cmd += ["-headers", headers]
             cmd += ["-i", stream_url, "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "5", str(out)]

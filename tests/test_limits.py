@@ -7,7 +7,7 @@ for k in ("PEAKCUT_MAX_LIVE_PER_USER", "PEAKCUT_MAX_JOBS_PER_USER", "PEAKCUT_MAX
     os.environ.pop(k, None)
 os.environ.update(DATABASE_URL="", PEAKCUT_MAX_LIVE="20")
 sys.path.insert(0, ".")
-from studio import auth, config, creators, ctx, db, live, load
+from studio import auth, config, creators, ctx, db, jobs, live, load
 db.init()
 fails = []
 def check(n, got, want=True):
@@ -15,6 +15,7 @@ def check(n, got, want=True):
     print(("PASS " if ok else "FAIL ") + n + ("" if ok else f"   got {got!r}")); ok or fails.append(n)
 
 check("five videos at once", config.MAX_ACTIVE_JOBS_PER_USER, 5)
+check("a video can request 100 clips", jobs.clean_options({"max_clips": 100})["max_clips"], 100)
 check("no cap on recordings, video length, recording length, storage, uploads or creators",
       all(x >= 10 ** 6 for x in (config.MAX_LIVE_PER_USER, config.MAX_VIDEO_HOURS, config.MAX_LIVE_HOURS, config.MAX_USER_GB,
                                  config.MAX_UPLOAD_MB, config.MAX_CREATORS)))
@@ -26,6 +27,8 @@ load.busy = lambda: False
 with ctx.as_user(u.id):
     cs = [creators.create({"name": f"Streamer {i}", "channel": f"https://www.twitch.tv/streamer{i}"}) for i in range(60)]
     check("more than 50 creators can be added", len(creators.all_creators()), 60)
+    cancel_job = jobs.create({"type": "file", "name": "cancel-test.mp4", "path": "/tmp/cancel-test.mp4"}, {}, enqueue=False)
+    check("an in-progress video can be cancelled", jobs.cancel(cancel_job["id"]) and cancel_job["status"] == "cancelled", True)
     jobs_ = [live.start_session(c) for c in cs[:4]]
     check("four streams record at once", len(live.active_mine()), 4)
     check("each recording belongs to the creator it was started for", [j["creator"] for j in jobs_], [c["id"] for c in cs[:4]])

@@ -267,10 +267,10 @@ def _filter(layout, fg_h, src_w, src_h, cam_rect=None, game_rect=None):
         if layout == "game":
             return f"[0:v]crop={gw}:{gh}:{gx}:{gy},{contain('game', W, H)}[game];[game]setsar=1[v0];"
         if layout in ("stack", "bottom"):
-            cam_h = max(2, (H * ch // (ch + gh)) // 2 * 2)
+            cam_h = H // 2 // 2 * 2
             game_h = H - cam_h
-            top = (f"[0:v]split=2[a][b];[a]crop={cw}:{ch}:{cx}:{cy},{contain('cam', W, cam_h)}[cam];"
-                   f"[b]crop={gw}:{gh}:{gx}:{gy},{contain('game', W, game_h)}[game];")
+            top = (f"[0:v]split=2[a][b];[a]crop={cw}:{ch}:{cx}:{cy},scale={W}:{cam_h}:flags=lanczos,setsar=1[cam];"
+                   f"[b]crop={gw}:{gh}:{gx}:{gy},scale={W}:{game_h}:flags=lanczos,setsar=1[game];")
             return top + (f"[game][cam]vstack=inputs=2,setsar=1[v0];" if layout == "bottom" else f"[cam][game]vstack=inputs=2,setsar=1[v0];")
         pip_w, pip_h = max(2, W // 3), max(2, int(W / max(cw / ch, 0.01) / 3))
         return (f"[0:v]split=2[a][b];[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}[game];"
