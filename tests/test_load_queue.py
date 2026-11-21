@@ -6,6 +6,7 @@ import threading
 import time
 
 os.environ["PEAKCUT_DATA"] = tempfile.mkdtemp()
+os.environ["PEAKCUT_QUEUE_GAP_SECONDS"] = "0.2"
 sys.path.insert(0, sys.argv[1])
 from studio import config, jobs, load  # noqa: E402
 

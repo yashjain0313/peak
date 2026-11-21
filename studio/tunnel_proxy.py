@@ -1,4 +1,4 @@
-"""Local-only proxy for a PeakCut server exposed through an ngrok tunnel."""
+"""Local-only proxy for a PeakCut server exposed through a Cloudflare tunnel."""
 import os
 from urllib.parse import urlparse
 from pathlib import Path
@@ -14,7 +14,7 @@ LISTEN_PORT = int(os.environ.get("PEAKCUT_PROXY_PORT", "8765"))
 WEB = Path(__file__).resolve().parent.parent / "web"
 
 if not TARGET:
-    raise SystemExit("Set PEAKCUT_REMOTE_URL to the Kaggle ngrok URL.")
+    raise SystemExit("    Set PEAKCUT_REMOTE_URL to the Kaggle Cloudflare tunnel URL.")
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 _HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer",
@@ -52,7 +52,7 @@ async def proxy(request: Request, path: str):
     if request.url.query:
         url += "?" + request.url.query
     headers = _headers(request.headers)
-    # httpx normally derives this from the URL, but set it explicitly so ngrok
+    # httpx normally derives this from the URL, but set it explicitly so the tunnel
     # never sees the browser's local Host header.
     headers["host"] = urlparse(TARGET).netloc
     # The browser is same-origin with this local gateway. Tell the remote

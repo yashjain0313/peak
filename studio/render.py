@@ -7,7 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import config, roman
+from . import audio_bgm, config, roman
 from .media import NO_WINDOW, run
 
 W, H = config.OUT_W, config.OUT_H
@@ -314,8 +314,14 @@ def _render_in(work: Path, src: Path, out_dir: Path, name: str, start, end, layo
     # install_fonts() already placed the bundled fonts in ~/Library/Fonts (macOS) or
     # ~/.local/share/fonts (Linux) so fontconfig finds them automatically.
     fc = _filter(layout, fg_h, src_w, src_h, clip.get("cam_rect"), clip.get("game_rect")) + f"[v0]ass={name}.ass[v]"
+    bgm_args, audio_filter = audio_bgm.mix_filter(end - start, clip.get("bgm_mood", "chill"))
+    if bgm_args:
+        fc = fc + ";" + audio_filter
+        audio_map = ["-map", "[a_out]", "-shortest"]
+    else:
+        audio_map = ["-map", "0:a:0", "-af", audio_filter]
     base = ["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.2f}", "-t", f"{end - start:.2f}", "-i", str(src),
-            "-filter_complex", fc, "-map", "[v]", "-map", "0:a:0", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
+            *bgm_args, "-filter_complex", fc, "-map", "[v]", *audio_map,
             "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-movflags", "+faststart", "-pix_fmt"]
     encoders = []
     if _qsv_ok is not False:

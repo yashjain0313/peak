@@ -7,7 +7,7 @@ for k in ("PEAKCUT_MAX_LIVE_PER_USER", "PEAKCUT_MAX_JOBS_PER_USER", "PEAKCUT_MAX
     os.environ.pop(k, None)
 os.environ.update(DATABASE_URL="", PEAKCUT_MAX_LIVE="20")
 sys.path.insert(0, ".")
-from studio import auth, config, creators, ctx, db, jobs, live, load
+from studio import audio_bgm, auth, brain, config, creators, ctx, db, jobs, live, load
 db.init()
 fails = []
 def check(n, got, want=True):
@@ -16,6 +16,17 @@ def check(n, got, want=True):
 
 check("five videos at once", config.MAX_ACTIVE_JOBS_PER_USER, 5)
 check("a video can request 100 clips", jobs.clean_options({"max_clips": 100})["max_clips"], 100)
+check("queued videos start at least one minute apart", float(config.env("PEAKCUT_QUEUE_GAP_SECONDS", "60")) >= 60)
+track = audio_bgm.choose()
+check("bundled BGM assets are available", track is not None and track.suffix == ".mp3")
+bgm_args, bgm_filter = audio_bgm.mix_filter(30)
+check("render uses looped ducked background music", "-stream_loop" in bgm_args and "sidechaincompress" in bgm_filter)
+epic_track = audio_bgm.choose("epic")
+check("AI-selected epic mood uses the epic BGM folder", epic_track is not None and epic_track.parent.name == "epic")
+epic_clip = brain._tidy({"category": "clutch", "bgm_mood": "epic", "score": 90}, 10, 40)
+check("AI clip answer carries an epic BGM mood", epic_clip["bgm_mood"] == "epic")
+funny_clip = brain._tidy({"category": "funny", "score": 80}, 10, 40)
+check("missing AI BGM mood falls back from the clip category", funny_clip["bgm_mood"] == "upbeat")
 check("no cap on recordings, video length, recording length, storage, uploads or creators",
       all(x >= 10 ** 6 for x in (config.MAX_LIVE_PER_USER, config.MAX_VIDEO_HOURS, config.MAX_LIVE_HOURS, config.MAX_USER_GB,
                                  config.MAX_UPLOAD_MB, config.MAX_CREATORS)))

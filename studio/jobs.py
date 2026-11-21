@@ -29,11 +29,11 @@ class _FairQueue:
         self.held = False                     # videos are waiting only because the machine is near full
 
     def _room(self) -> bool:
-        """May one more video start? One always may. More only while the machine has room, and a few seconds
-        after the last one started, so its weight is already showing in the measurements."""
+        """May one more video start? One always may. Later videos start at least one minute apart."""
         if self.running == 0:
             return True
-        return self.running < config.JOB_WORKERS and time.time() - self.last_start > 6 and not load.busy()
+        gap = max(0.1, float(config.env("PEAKCUT_QUEUE_GAP_SECONDS", "60")))
+        return self.running < config.JOB_WORKERS and time.time() - self.last_start > gap and not load.busy()
 
     def done(self):
         with self.cv:
@@ -175,8 +175,10 @@ def public(job) -> dict:
     if job.get("status") == "queued":
         n = _q.ahead().get(job["id"])
         if n:
-            out["stage"] = (f"High demand right now: {n} video{'s' if n != 1 else ''} ahead of yours" if _q.held else
-                            f"Waiting in line: {n} video{'s' if n != 1 else ''} ahead of yours")
+            gap = max(0.1, float(config.env("PEAKCUT_QUEUE_GAP_SECONDS", "60")))
+            wait_minutes = max(1, math.ceil((n + 1) * gap / 60))
+            out["stage"] = (f"High demand right now: about {wait_minutes} minute{'s' if wait_minutes != 1 else ''} until your video starts"
+                            f" ({n} ahead)")
         elif n == 0 and _q.held:
             out["stage"] = "High demand right now: yours is next"
     return out
